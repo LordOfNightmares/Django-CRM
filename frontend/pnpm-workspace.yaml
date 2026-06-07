@@ -4,4 +4,6 @@ minimumReleaseAgeExclude:
   - '@sveltejs/kit@2.61.1'
 onlyBuiltDependencies:
   - esbuild
-  - '@sentry/cli'
+  - "@sentry/cli"
+overrides:
+  "svelte-eslint-parser>eslint-scope": "^9.1.0"

@@ -6,8 +6,11 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
 
 # Install dependencies (layer cached)
-COPY package.json pnpm-lock.yaml* ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY .npmrc ./
 RUN pnpm install --frozen-lockfile || pnpm install
+# SvelteKit generated config
+COPY . . 
 
 EXPOSE 5173
 
