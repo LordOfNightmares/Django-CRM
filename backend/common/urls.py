@@ -9,6 +9,8 @@ from common.views.auth_views import (
     MeView,
     OrgAwareTokenRefreshView,
     OrgSwitchView,
+    PasswordLoginStatusView,
+    PasswordLoginView,
 )
 from common.views.custom_field_views import (
     CustomFieldDefinitionDetailView,
@@ -62,6 +64,9 @@ urlpatterns = [
     path("auth/google/callback/", GoogleOAuthCallbackView.as_view()),
     # Google ID token auth for mobile apps
     path("auth/google/", GoogleIdTokenView.as_view(), name="google_id_token"),
+    # Email/password login (DEBUG only — Docker/local dev)
+    path("auth/login/status/", PasswordLoginStatusView.as_view(), name="password_login_status"),
+    path("auth/login/", PasswordLoginView.as_view(), name="password_login"),
     # Magic link (passwordless) authentication
     path("auth/magic-link/request/", MagicLinkRequestView.as_view(), name="magic_link_request"),
     path("auth/magic-link/verify/", MagicLinkVerifyView.as_view(), name="magic_link_verify"),

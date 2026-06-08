@@ -34,8 +34,11 @@ class GetProfileAndOrg:
             "/api/auth/switch-org/",
             "/api/auth/magic-link/request/",
             "/api/auth/magic-link/verify/",
+            "/api/auth/magic-link/verify-code/",
+            "/api/auth/login/",
+            "/api/auth/login/status/",
         ]
-        if request.path in auth_skip_paths:
+        if request.path in auth_skip_paths or request.path.startswith("/admin"):
             return
 
         # Initialize request attributes

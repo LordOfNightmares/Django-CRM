@@ -313,6 +313,20 @@ CORS_ALLOWED_ORIGINS = [
 # Security: CSRF trusted origins via environment variable
 _csrf_origins = os.environ.get("CSRF_TRUSTED_ORIGINS", "")
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(",") if o.strip()]
+if ENV_TYPE == "dev" and not CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:8001",
+        "http://127.0.0.1:8001",
+    ]
+
+AUTHENTICATION_BACKENDS = [
+    "common.backends.EmailBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
 
 # Security: HSTS with 1 year duration (recommended minimum)
 SECURE_HSTS_SECONDS = 31536000  # 1 year

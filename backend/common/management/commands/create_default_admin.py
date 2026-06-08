@@ -7,14 +7,10 @@ User = get_user_model()
 
 
 class Command(BaseCommand):
-    help = "Create a default superuser if none exists (for Docker bootstrap)"
+    help = "Create or update the default superuser (for Docker bootstrap)"
 
     def handle(self, *args, **options):
-        if User.objects.filter(is_superuser=True).exists():
-            self.stdout.write(self.style.SUCCESS("Superuser already exists — skipping."))
-            return
-
-        email = os.environ.get("ADMIN_EMAIL", "admin@localhost")
+        email = os.environ.get("ADMIN_EMAIL", "admin@localhost").lower()
         password = os.environ.get("ADMIN_PASSWORD", "")
 
         if not password:
@@ -26,8 +22,17 @@ class Command(BaseCommand):
             )
             password = "admin"
 
-        User.objects.create_superuser(
-            email=email,
-            password=password,
-        )
+        user = User.objects.filter(email=email).first()
+        if user:
+            user.is_superuser = True
+            user.is_staff = True
+            user.is_active = True
+            user.set_password(password)
+            user.save()
+            self.stdout.write(
+                self.style.SUCCESS(f"Updated default admin user: {email}")
+            )
+            return
+
+        User.objects.create_superuser(email=email, password=password)
         self.stdout.write(self.style.SUCCESS(f"Created default superuser: {email}"))

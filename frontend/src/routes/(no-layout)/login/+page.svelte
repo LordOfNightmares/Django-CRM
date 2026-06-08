@@ -1,18 +1,22 @@
 <script>
   import '../../../app.css';
-  import { enhance } from '$app/forms';
+  import { enhance, applyAction } from '$app/forms';
 
   import imgGoogle from '$lib/assets/images/google.svg';
   import imgLogo from '$lib/assets/images/logo.png';
   import { ArrowRight } from '@lucide/svelte';
 
-  let { data = {} } = $props();
+  let { data = {}, form } = $props();
 
   let isLoading = $state(false);
   let email = $state('');
+  let devEmail = $state('admin@localhost');
+  let devPassword = $state('admin');
   let magicLinkSent = $state(false);
   let isSendingLink = $state(false);
   let magicLinkError = $state('');
+  let isPasswordLoggingIn = $state(false);
+  let passwordLoginError = $state('');
 
   function handleGoogleLogin() {
     isLoading = true;
@@ -30,6 +34,23 @@
       } else if (!result) {
         magicLinkError = 'Something went wrong. Please try again.';
       }
+    };
+  }
+
+  function handlePasswordLogin() {
+    isPasswordLoggingIn = true;
+    passwordLoginError = '';
+    return async ({ result }) => {
+      isPasswordLoggingIn = false;
+      if (result.type === 'redirect') {
+        await applyAction(result);
+        return;
+      }
+      if (result.type === 'failure' && result.data?.error) {
+        passwordLoginError = result.data.error;
+        return;
+      }
+      await applyAction(result);
     };
   }
 </script>
@@ -83,7 +104,7 @@
           <p class="magic-link-hint">The link expires in 10 minutes.</p>
         </div>
       {:else}
-        <form method="POST" use:enhance={handleMagicLink} class="magic-link-form">
+        <form method="POST" action="?/magicLink" use:enhance={handleMagicLink} class="magic-link-form">
           <input
             type="email"
             name="email"
@@ -105,6 +126,45 @@
         </form>
         {#if magicLinkError}
           <p class="magic-link-error">{magicLinkError}</p>
+        {/if}
+      {/if}
+
+      {#if data.enablePasswordLogin}
+        <div class="divider">
+          <span>sign in with password</span>
+        </div>
+
+        <form method="POST" action="?/passwordLogin" use:enhance={handlePasswordLogin} class="magic-link-form">
+          <input
+            type="email"
+            name="email"
+            placeholder="admin@localhost"
+            class="email-input"
+            required
+            bind:value={devEmail}
+            disabled={isPasswordLoggingIn}
+          />
+          <input
+            type="password"
+            name="password"
+            placeholder="Password"
+            class="email-input"
+            required
+            bind:value={devPassword}
+            disabled={isPasswordLoggingIn}
+          />
+          <button type="submit" class="magic-link-btn" disabled={isPasswordLoggingIn}>
+            {#if isPasswordLoggingIn}
+              <span class="spinner"></span>
+              <span>Signing in...</span>
+            {:else}
+              <span>Sign in with password</span>
+              <ArrowRight size={16} />
+            {/if}
+          </button>
+        </form>
+        {#if passwordLoginError}
+          <p class="magic-link-error">{passwordLoginError}</p>
         {/if}
       {/if}
     </div>

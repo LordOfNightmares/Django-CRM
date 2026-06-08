@@ -11,7 +11,7 @@
  */
 
 import axios from 'axios';
-import { redirect } from '@sveltejs/kit';
+import { fail, isRedirect, redirect } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 import { generateCodeVerifier, generateCodeChallenge, generateState } from '$lib/utils/pkce.js';
@@ -26,6 +26,43 @@ const COOKIE_OPTIONS = {
   sameSite: 'lax'
 };
 
+/** True only when PUBLIC_ENABLE_PASSWORD_LOGIN is explicitly enabled. */
+function isPasswordLoginEnabledInEnv() {
+  const flag = (publicEnv.PUBLIC_ENABLE_PASSWORD_LOGIN ?? '').trim().toLowerCase();
+  if (!flag || flag === 'false' || flag === '0' || flag === 'no' || flag === 'off') {
+    return false;
+  }
+  return flag === 'true' || flag === '1' || flag === 'yes';
+}
+
+/** Backend allows password login only when DEBUG=True. */
+async function isPasswordLoginEnabledOnBackend(apiUrl) {
+  try {
+    const response = await axios.get(`${apiUrl}/api/auth/login/status/`, {
+      timeout: 3000
+    });
+    return response.data?.enabled === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Show password login only when BOTH are true:
+ * - PUBLIC_ENABLE_PASSWORD_LOGIN=True (frontend env)
+ * - DEBUG=True on the backend (via /api/auth/login/status/)
+ */
+async function resolvePasswordLoginEnabled() {
+  if (!isPasswordLoginEnabledInEnv()) {
+    return false;
+  }
+  const apiUrl = publicEnv.PUBLIC_DJANGO_API_URL;
+  if (!apiUrl) {
+    return false;
+  }
+  return isPasswordLoginEnabledOnBackend(apiUrl);
+}
+
 /**
  * Get secure cookie options based on environment
  * @param {number} maxAge - Cookie max age in seconds
@@ -37,37 +74,6 @@ function getCookieOptions(maxAge) {
     secure: env.NODE_ENV === 'production',
     maxAge
   };
-}
-
-/** @type {import('@sveltejs/kit').ServerLoad} */
-export async function load({ url, cookies }) {
-  const code = url.searchParams.get('code');
-  const returnedState = url.searchParams.get('state');
-  const error = url.searchParams.get('error');
-  const errorDescription = url.searchParams.get('error_description');
-
-  // Handle OAuth error returned from Google
-  if (error) {
-    console.error('Google OAuth error:', error, errorDescription);
-    return {
-      google_url: null,
-      error: errorDescription || `OAuth error: ${error}`
-    };
-  }
-
-  // Handle OAuth callback with authorization code
-  if (code) {
-    return handleOAuthCallback(code, returnedState, cookies);
-  }
-
-  // Check if user is already authenticated
-  const jwtAccess = cookies.get('jwt_access');
-  if (jwtAccess) {
-    throw redirect(307, '/org');
-  }
-
-  // Generate OAuth parameters and return login URL
-  return await generateOAuthUrl(cookies);
 }
 
 /**
@@ -144,7 +150,7 @@ async function handleOAuthCallback(code, returnedState, cookies) {
   }
 
   // Success - redirect to organization selection
-  throw redirect(307, '/org');
+  throw redirect(303, '/org');
 }
 
 /**
@@ -187,9 +193,93 @@ async function generateOAuthUrl(cookies) {
   return { google_url: google_login_url };
 }
 
+/** @type {import('@sveltejs/kit').ServerLoad} */
+export async function load({ url, cookies }) {
+  const code = url.searchParams.get('code');
+  const returnedState = url.searchParams.get('state');
+  const error = url.searchParams.get('error');
+  const errorDescription = url.searchParams.get('error_description');
+  const enablePasswordLogin = await resolvePasswordLoginEnabled();
+
+  // Handle OAuth error returned from Google
+  if (error) {
+    console.error('Google OAuth error:', error, errorDescription);
+    return {
+      google_url: null,
+      error: errorDescription || `OAuth error: ${error}`,
+      enablePasswordLogin
+    };
+  }
+
+  // Handle OAuth callback with authorization code
+  if (code) {
+    return handleOAuthCallback(code, returnedState, cookies);
+  }
+
+  // Check if user is already authenticated
+  const jwtAccess = cookies.get('jwt_access');
+  if (jwtAccess) {
+    throw redirect(303, '/org');
+  }
+
+  // Generate OAuth parameters and return login URL
+  const oauthData = await generateOAuthUrl(cookies);
+  return {
+    ...oauthData,
+    enablePasswordLogin
+  };
+}
+
 /** @type {import('@sveltejs/kit').Actions} */
 export const actions = {
-  default: async ({ request }) => {
+  passwordLogin: async ({ request, cookies }) => {
+    if (!(await resolvePasswordLoginEnabled())) {
+      return fail(403, { error: 'Password login is not available.' });
+    }
+
+    const formData = await request.formData();
+    const email = formData.get('email')?.toString();
+    const password = formData.get('password')?.toString();
+
+    if (!email || !password) {
+      return fail(400, { error: 'Email and password are required' });
+    }
+
+    try {
+      const apiUrl = publicEnv.PUBLIC_DJANGO_API_URL;
+      const response = await axios.post(
+        `${apiUrl}/api/auth/login/`,
+        { email, password },
+        { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }
+      );
+
+      const { access_token, refresh_token, current_org } = response.data;
+
+      cookies.set('jwt_access', access_token, getCookieOptions(60 * 60 * 24));
+      cookies.set('jwt_refresh', refresh_token, getCookieOptions(60 * 60 * 24 * 365));
+
+      if (current_org?.id) {
+        cookies.set('org', current_org.id, {
+          path: '/',
+          httpOnly: true,
+          sameSite: 'strict',
+          secure: env.NODE_ENV === 'production',
+          maxAge: 60 * 60 * 24 * 365
+        });
+      }
+
+      throw redirect(303, current_org?.id ? '/' : '/org');
+    } catch (error) {
+      if (isRedirect(error)) {
+        throw error;
+      }
+      const message =
+        error.response?.data?.error || 'Invalid email or password. Please try again.';
+      return fail(401, { error: message });
+    }
+  },
+
+  magicLink: async ({ request }) => {
     const formData = await request.formData();
     const email = formData.get('email');
 
@@ -211,3 +301,4 @@ export const actions = {
     }
   }
 };
+

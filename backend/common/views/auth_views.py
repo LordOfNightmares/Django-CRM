@@ -478,6 +478,108 @@ class OrgSwitchView(APIView):
         )
 
 
+class PasswordLoginStatusView(APIView):
+    """Report whether email/password login is available (DEBUG only)."""
+
+    permission_classes = []
+    authentication_classes = []
+
+    @extend_schema(
+        tags=["auth"],
+        responses={
+            200: inline_serializer(
+                name="PasswordLoginStatusResponse",
+                fields={"enabled": serializers.BooleanField()},
+            )
+        },
+    )
+    def get(self, request):
+        return Response({"enabled": settings.DEBUG}, status=status.HTTP_200_OK)
+
+
+class PasswordLoginView(APIView):
+    """
+    Email/password login for local development and Docker bootstrap.
+
+    Disabled when DEBUG=False so production stays passwordless-only.
+    """
+
+    permission_classes = []
+    authentication_classes = []
+
+    @extend_schema(
+        tags=["auth"],
+        request=serializer.PasswordLoginSerializer,
+        responses={
+            200: inline_serializer(
+                name="PasswordLoginResponse",
+                fields={
+                    "access_token": serializers.CharField(),
+                    "refresh_token": serializers.CharField(),
+                    "user": serializers.DictField(),
+                },
+            )
+        },
+    )
+    def post(self, request):
+        from django.contrib.auth import authenticate
+
+        from common.audit_log import audit_log
+
+        if not settings.DEBUG:
+            return Response(
+                {"error": "Password login is disabled"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer_obj = serializer.PasswordLoginSerializer(data=request.data)
+        if not serializer_obj.is_valid():
+            return Response(
+                {"error": "Invalid email or password"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        email = serializer_obj.validated_data["email"].lower()
+        password = serializer_obj.validated_data["password"]
+
+        user = authenticate(request, email=email, password=password)
+        if user is None or not user.is_active:
+            return Response(
+                {"error": "Invalid email or password"},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        user.last_login = timezone.now()
+        user.save(update_fields=["last_login"])
+
+        profiles = Profile.objects.filter(user=user, is_active=True)
+        default_org = None
+        profile = None
+        if profiles.exists():
+            profile = profiles.first()
+            default_org = profile.org
+
+        if default_org:
+            token = OrgAwareRefreshToken.for_user_and_org(user, default_org, profile)
+        else:
+            token = OrgAwareRefreshToken.for_user_and_org(user, None)
+
+        audit_log.login_success(user, default_org, request)
+
+        response_data = {
+            "access_token": str(token.access_token),
+            "refresh_token": str(token),
+            "user": serializer.UserDetailSerializer(user).data,
+        }
+        if default_org:
+            response_data["current_org"] = {
+                "id": str(default_org.id),
+                "name": default_org.name,
+            }
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
+
 class MagicLinkRequestView(APIView):
     """
     Request a magic link for passwordless login/registration.

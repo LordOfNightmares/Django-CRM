@@ -114,9 +114,13 @@ class RequireOrgContext:
         "/api/auth/magic-link/request/",
         "/api/auth/magic-link/verify/",
         "/api/auth/magic-link/verify-code/",
+        "/api/auth/login/",
+        "/api/auth/login/status/",
         "/api/org/",
         "/admin/",
+        "/healthz/",
         "/swagger-ui/",
+        "/schema/",
         "/api/schema/",
         # Public CSAT survey link (Tier 2 csat) — anonymous, sets RLS
         # context manually inside the view from the survey's own org_id.
@@ -156,6 +160,8 @@ class RequireOrgContext:
 
     def _is_exempt(self, path):
         """Check if path is exempt from org context requirement."""
+        if path == "/admin" or path.startswith("/admin/"):
+            return True
         return any(path.startswith(exempt) for exempt in self.EXEMPT_PATHS)
 
     def _set_org_context(self, request):
